@@ -5,7 +5,11 @@ use strict;
 use warnings FATAL => 'all';
 use Devel::REPL::Plugin;
 use Path::Tiny;
+use LWP::UserAgent;
+use JSON;
 use namespace::autoclean;
+
+=encoding utf8
 
 =head1 NAME
 
@@ -22,31 +26,83 @@ our $VERSION = '0.01';
 
 =head1 SYNOPSIS
 
-Quick summary of what the module does.
-
-Perhaps a little code snippet.
-
-    use Devel::REPL::Plugin::LoadScript;
-
-    my $foo = Devel::REPL::Plugin::LoadScript->new();
-    ...
+At Devel::REPL prompt
+    
+    $ $_REPL->load_plugin('LoadScript')
+    $ #loadscript scripts/myscript.pl
 
 =cut
 
-around 'read' => sub {
-  my $orig = shift;
-  my ($self, @args) = @_;
+=head1 Methods
 
-  my $line = $self->$orig(@args);
-  if (defined $line) {
-    if ($line =~ m/^:loadscript ?(.*)$/) {
-      my $file = path($1);
-      #$self->formatted_eval($file->slurp);
-      return $file->slurp;
+=cut
+
+=head2 command_loadscript
+
+Try to load and eval the script.
+
+=cut
+
+sub command_loadscript {
+
+  my ($self, undef, $filename) = @_;
+
+  my $file = path($filename);
+  if ($file->exists) {
+    return $self->formatted_eval($file->slurp);
+  } 
+  return 'File does not exists!';
+}
+
+=head2 command_loadgist
+
+Try to load an eval a gist
+
+=cut
+
+sub command_loadgist {
+    my ($self, undef, $gisturl) = @_;
+
+    if ($gisturl =~ m{https://gist.github.com(?:.*)/([^/]+)}) {
+        my $api_url = 'https://api.github.com/gists/' . $1;
+        my $ua = LWP::UserAgent->new;
+        my $response = $ua->get($api_url); 
+        if ($response->is_error) {
+            my $text = $response->status_line;
+            return 'Failed: ' . $text;
+        }
+        my $files = decode_json($response->content)->{'files'};
+        my @filenames = keys %$files;
+        if (scalar @filenames == 1) {
+            return $self->formatted_eval($files->{$filenames[0]}{'content'});
+        }
+    } else {
+        return 'URL not recognized: ' . $gisturl;
     }
-  }
-  return $line;
-};
+}
+
+=head2 BEFORE_PLUGIN
+
+Load Turtles plugin and "register" the command
+
+=cut
+
+sub BEFORE_PLUGIN {
+    my ( $repl ) = @_;
+
+    $repl->load_plugin('Turtles');
+    $repl->add_turtles_matcher(sub {
+        my ( $line ) = @_;
+
+        my $prefix = $repl->default_command_prefix;
+
+        if($line =~ /^${prefix}loadscript/) {
+            return {}; 
+        }
+
+        return;
+    });
+}
 
 =head1 AUTHOR
 
